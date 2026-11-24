@@ -339,23 +339,26 @@ end
 
 local function startTargetFling(target)
 	stopTargetFling()
-	if not target or not target.Character or not hrp then return end
+	if not target or not target.Character or not hrp or not humanoid then return end
 	targetFlingPlayer = target
 
-	-- Включаем сам флинг (он сделает нас тяжелыми)
+	-- Включаем флинг (делает нас тяжелыми и отключает вращение)
 	startFling(true)
 	notify("Target Fling: "..target.Name, true)
 
-	-- Создаем BodyVelocity, чтобы жестко контролировать наше движение
+	-- Отключаем управление персонажем, чтобы он просто летел
+	humanoid.PlatformStand = true
+
+	-- Создаем BodyVelocity для полета к цели
 	targetFlingBV = Instance.new("BodyVelocity")
 	targetFlingBV.Name = "TargetFlingVelocity"
-	targetFlingBV.MaxForce = Vector3.new(1e5, 0, 1e5) -- Оставляем Y свободным (чтобы падать/прыгать)
+	targetFlingBV.MaxForce = Vector3.new(1e5, 0, 1e5) -- Держим X/Z, Y свободен
 	targetFlingBV.P = 10000
 	targetFlingBV.Parent = hrp
 
 	targetFlingConnection = RunService.Heartbeat:Connect(function()
 		refreshCharacter()
-		if not hrp or not targetFlingPlayer or not targetFlingPlayer.Character then
+		if not hrp or not humanoid or not targetFlingPlayer or not targetFlingPlayer.Character then
 			stopTargetFling()
 			return
 		end
@@ -365,24 +368,17 @@ local function startTargetFling(target)
 			local direction = (tHrp.Position - hrp.Position)
 			local horizontalDir = Vector3.new(direction.X, 0, direction.Z)
 
-			if horizontalDir.Magnitude > 1 then
+			if horizontalDir.Magnitude > 2 then
 				horizontalDir = horizontalDir.Unit
-				-- Задаем скорость через BodyVelocity, а не напрямую в AssemblyLinearVelocity
-				targetFlingBV.Velocity = horizontalDir * 150
+				-- Устанавливаем комфортную скорость полета (60 studs/s)
+				targetFlingBV.Velocity = horizontalDir * 60
 			else
+				-- Если мы уже рядом с целью, сбрасываем скорость (чтобы мы начали крутиться на месте и откидывать)
 				targetFlingBV.Velocity = Vector3.zero
 			end
 		end
 	end)
 end
-player.CharacterAdded:Connect(function()
-	refreshCharacter()
-	if state.fling and stopFling then stopFling() end
-	if targetFlingConnection then stopTargetFling() end
-	if state.fly and stopFly then stopFly() end
-	if state.trail and stopTrail then stopTrail() startTrail() end
-end)
-
 -- ====== ANTI-FLING ======
 local function stopAntifling()
 	state.antifling=false
