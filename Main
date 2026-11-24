@@ -320,10 +320,18 @@ local function toggleFling()
 end
 
 -- ====== TARGET FLING ======
+local targetFlingConnection = nil
+local targetFlingPlayer = nil
+local targetFlingBV = nil
+
 local function stopTargetFling()
 	if targetFlingConnection then
 		targetFlingConnection:Disconnect()
 		targetFlingConnection = nil
+	end
+	if targetFlingBV then
+		targetFlingBV:Destroy()
+		targetFlingBV = nil
 	end
 	targetFlingPlayer = nil
 	if flinging then stopFling() end
@@ -331,10 +339,19 @@ end
 
 local function startTargetFling(target)
 	stopTargetFling()
-	if not target or not target.Character then return end
+	if not target or not target.Character or not hrp then return end
 	targetFlingPlayer = target
+
+	-- Включаем сам флинг (он сделает нас тяжелыми)
 	startFling(true)
 	notify("Target Fling: "..target.Name, true)
+
+	-- Создаем BodyVelocity, чтобы жестко контролировать наше движение
+	targetFlingBV = Instance.new("BodyVelocity")
+	targetFlingBV.Name = "TargetFlingVelocity"
+	targetFlingBV.MaxForce = Vector3.new(1e5, 0, 1e5) -- Оставляем Y свободным (чтобы падать/прыгать)
+	targetFlingBV.P = 10000
+	targetFlingBV.Parent = hrp
 
 	targetFlingConnection = RunService.Heartbeat:Connect(function()
 		refreshCharacter()
@@ -342,14 +359,22 @@ local function startTargetFling(target)
 			stopTargetFling()
 			return
 		end
+
 		local tHrp = targetFlingPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if tHrp then
-			local direction = (tHrp.Position - hrp.Position).Unit
-			hrp.AssemblyLinearVelocity = Vector3.new(direction.X * 150, hrp.AssemblyLinearVelocity.Y, direction.Z * 150)
+		if tHrp and targetFlingBV then
+			local direction = (tHrp.Position - hrp.Position)
+			local horizontalDir = Vector3.new(direction.X, 0, direction.Z)
+
+			if horizontalDir.Magnitude > 1 then
+				horizontalDir = horizontalDir.Unit
+				-- Задаем скорость через BodyVelocity, а не напрямую в AssemblyLinearVelocity
+				targetFlingBV.Velocity = horizontalDir * 150
+			else
+				targetFlingBV.Velocity = Vector3.zero
+			end
 		end
 	end)
 end
-
 player.CharacterAdded:Connect(function()
 	refreshCharacter()
 	if state.fling and stopFling then stopFling() end
