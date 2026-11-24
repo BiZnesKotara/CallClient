@@ -102,6 +102,8 @@ local flyBodyVelocity,flyBodyGyro
 local espHighlights={}
 local flinging=false
 local flingConnection,flingDied
+local targetFlingConnection = nil
+local targetFlingPlayer = nil
 
 local function refreshCharacter()
 	char=player.Character
@@ -110,6 +112,8 @@ local function refreshCharacter()
 	humanoid=char:FindFirstChildOfClass("Humanoid")
 end
 refreshCharacter()
+
+local stopTrail, startTrail, stopFling, stopFly
 
 -- ====== GUI ======
 local screenGui=Instance.new("ScreenGui") screenGui.Name="CallClient" screenGui.ResetOnSpawn=false screenGui.IgnoreGuiInset=true screenGui.DisplayOrder=999 screenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling screenGui.Parent=playerGui
@@ -171,7 +175,7 @@ local function notify(text, on)
 end
 
 -- ====== FLY ======
-local function stopFly()
+function stopFly()
 	state.fly=false
 	if flyConnection then flyConnection:Disconnect() flyConnection=nil end
 	if flyBodyVelocity then flyBodyVelocity:Destroy() flyBodyVelocity=nil end
@@ -215,8 +219,8 @@ local function startNoclip()
 end
 local function toggleNoclip() if state.noclip then stopNoclip() else startNoclip() end return state.noclip end
 
--- ====== FLING (исправленный) ======
-local function stopFling()
+-- ====== FLING ======
+function stopFling()
 	flinging = false
 	state.fling = false
 	if flingConnection then
@@ -251,7 +255,7 @@ local function stopFling()
 	notify("Fling OFF", false)
 end
 
-local function startFling()
+local function startFling(silent)
 	refreshCharacter()
 	if not hrp or not humanoid then return end
 	flinging = true
@@ -281,7 +285,6 @@ local function startFling()
 	bambam.Name = "IYFling_" .. math.random(1, 9999)
 	bambam.Parent = hrp
 	bambam.AngularVelocity = Vector3.new(0, settings.flingPower, 0)
-	-- ВАЖНО: ограничиваем X/Z, иначе откидывает тебя
 	bambam.MaxTorque = Vector3.new(0, math.huge, 0)
 	bambam.P = math.huge
 
@@ -308,7 +311,7 @@ local function startFling()
 			task.wait(0.1)
 		end
 	end)
-	notify("Fling ON", true)
+	if not silent then notify("Fling ON", true) end
 end
 
 local function toggleFling()
@@ -316,10 +319,41 @@ local function toggleFling()
 	return flinging
 end
 
--- теперь CharacterAdded можно подключать
+-- ====== TARGET FLING ======
+local function stopTargetFling()
+	if targetFlingConnection then
+		targetFlingConnection:Disconnect()
+		targetFlingConnection = nil
+	end
+	targetFlingPlayer = nil
+	if flinging then stopFling() end
+end
+
+local function startTargetFling(target)
+	stopTargetFling()
+	if not target or not target.Character then return end
+	targetFlingPlayer = target
+	startFling(true)
+	notify("Target Fling: "..target.Name, true)
+
+	targetFlingConnection = RunService.Heartbeat:Connect(function()
+		refreshCharacter()
+		if not hrp or not targetFlingPlayer or not targetFlingPlayer.Character then
+			stopTargetFling()
+			return
+		end
+		local tHrp = targetFlingPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if tHrp then
+			local direction = (tHrp.Position - hrp.Position).Unit
+			hrp.AssemblyLinearVelocity = Vector3.new(direction.X * 150, hrp.AssemblyLinearVelocity.Y, direction.Z * 150)
+		end
+	end)
+end
+
 player.CharacterAdded:Connect(function()
 	refreshCharacter()
 	if state.fling and stopFling then stopFling() end
+	if targetFlingConnection then stopTargetFling() end
 	if state.fly and stopFly then stopFly() end
 	if state.trail and stopTrail then stopTrail() startTrail() end
 end)
@@ -833,6 +867,7 @@ makeToggleButton(cmdScroll,"noclip","Noclip",3,toggleNoclip)
 makeToggleButton(cmdScroll,"fling","Fling",4,toggleFling)
 makeToggleButton(cmdScroll,"antifling","Anti-Fling",5,toggleAntifling)
 makeToggleButton(cmdScroll,"aim","Aim Assist",6,toggleAim)
+
 makeSectionLabel(cmdScroll,"PLAYER",7)
 makeSlider(cmdScroll,"walkSpeed","Walk Speed",1,100,1,8,function(v) return tostring(v) end,function(v) refreshCharacter() if humanoid then humanoid.WalkSpeed=v end end)
 makeSlider(cmdScroll,"jumpPower","Jump Power",1,200,1,9,function(v) return tostring(v) end,function(v) refreshCharacter() if humanoid then humanoid.JumpPower=v end end)
@@ -862,17 +897,36 @@ local function refreshPlayerList()
 		if plr~=player then
 			local row=Instance.new("Frame") row.Size=UDim2.new(1,0,0,40) row.BackgroundColor3=COL.panel row.BorderSizePixel=0 row.Parent=playerListHolder
 			Instance.new("UICorner",row).CornerRadius=UDim.new(0,8) reg(row,"panel")
-			local nameLbl=Instance.new("TextLabel") nameLbl.Size=UDim2.new(1,-150,1,0) nameLbl.Position=UDim2.new(0,12,0,0) nameLbl.BackgroundTransparency=1 nameLbl.Text=plr.Name nameLbl.TextColor3=COL.text nameLbl.Font=Enum.Font.GothamMedium nameLbl.TextSize=12 nameLbl.TextXAlignment=Enum.TextXAlignment.Left nameLbl.Parent=row reg(nameLbl,"text","TextColor3")
-			local tpBtn=Instance.new("TextButton") tpBtn.Size=UDim2.new(0,54,0,26) tpBtn.Position=UDim2.new(1,-124,0.5,0) tpBtn.AnchorPoint=Vector2.new(0,0.5) tpBtn.BackgroundColor3=COL.accent tpBtn.Text="TP" tpBtn.TextColor3=Color3.new(1,1,1) tpBtn.Font=Enum.Font.GothamBold tpBtn.TextSize=11 tpBtn.AutoButtonColor=false tpBtn.Parent=row
+			local nameLbl=Instance.new("TextLabel") nameLbl.Size=UDim2.new(1,-210,1,0) nameLbl.Position=UDim2.new(0,12,0,0) nameLbl.BackgroundTransparency=1 nameLbl.Text=plr.Name nameLbl.TextColor3=COL.text nameLbl.Font=Enum.Font.GothamMedium nameLbl.TextSize=12 nameLbl.TextXAlignment=Enum.TextXAlignment.Left nameLbl.Parent=row reg(nameLbl,"text","TextColor3")
+
+			local tpBtn=Instance.new("TextButton") tpBtn.Size=UDim2.new(0,54,0,26) tpBtn.Position=UDim2.new(1,-184,0.5,0) tpBtn.AnchorPoint=Vector2.new(0,0.5) tpBtn.BackgroundColor3=COL.accent tpBtn.Text="TP" tpBtn.TextColor3=Color3.new(1,1,1) tpBtn.Font=Enum.Font.GothamBold tpBtn.TextSize=11 tpBtn.AutoButtonColor=false tpBtn.Parent=row
 			Instance.new("UICorner",tpBtn).CornerRadius=UDim.new(0,7) reg(tpBtn,"accent")
-			local specBtn=Instance.new("TextButton") specBtn.Size=UDim2.new(0,54,0,26) specBtn.Position=UDim2.new(1,-64,0.5,0) specBtn.AnchorPoint=Vector2.new(0,0.5) specBtn.BackgroundColor3=COL.item specBtn.Text="View" specBtn.TextColor3=COL.text specBtn.Font=Enum.Font.GothamBold specBtn.TextSize=11 specBtn.AutoButtonColor=false specBtn.Parent=row
+
+			local specBtn=Instance.new("TextButton") specBtn.Size=UDim2.new(0,54,0,26) specBtn.Position=UDim2.new(1,-124,0.5,0) specBtn.AnchorPoint=Vector2.new(0,0.5) specBtn.BackgroundColor3=COL.item specBtn.Text="View" specBtn.TextColor3=COL.text specBtn.Font=Enum.Font.GothamBold specBtn.TextSize=11 specBtn.AutoButtonColor=false specBtn.Parent=row
 			Instance.new("UICorner",specBtn).CornerRadius=UDim.new(0,7) reg(specBtn,"item")
+
+			local flingBtn = Instance.new("TextButton")
+			flingBtn.Size = UDim2.new(0, 54, 0, 26); flingBtn.Position = UDim2.new(1, -64, 0.5, 0); flingBtn.AnchorPoint = Vector2.new(0, 0.5)
+			flingBtn.BackgroundColor3 = COL.close; flingBtn.Text = "Target Fling"; flingBtn.TextColor3 = Color3.new(1,1,1); flingBtn.Font = Enum.Font.GothamBold; flingBtn.TextSize = 10; flingBtn.AutoButtonColor = false; flingBtn.Parent = row
+			Instance.new("UICorner", flingBtn).CornerRadius = UDim.new(0, 7) reg(flingBtn, "close")
+
 			local viewing=false
 			tpBtn.MouseButton1Click:Connect(function() refreshCharacter() if not hrp or not plr.Character then return end local t=plr.Character:FindFirstChild("HumanoidRootPart") if t then hrp.CFrame=t.CFrame+Vector3.new(3,1,0) end end)
 			specBtn.MouseButton1Click:Connect(function()
 				refreshCharacter()
 				if viewing then viewing=false if humanoid then workspace.CurrentCamera.CameraSubject=humanoid end specBtn.Text="View"
 				else if plr.Character then viewing=true workspace.CurrentCamera.CameraSubject=plr.Character:FindFirstChildOfClass("Humanoid") or plr.Character specBtn.Text="Stop" end end
+			end)
+
+			flingBtn.MouseButton1Click:Connect(function()
+				if targetFlingPlayer == plr then
+					stopTargetFling()
+					flingBtn.Text = "Target Fling"
+					notify("Target Fling OFF", false)
+				else
+					startTargetFling(plr)
+					flingBtn.Text = "Stop Fling"
+				end
 			end)
 		end
 	end
@@ -969,6 +1023,7 @@ local function setNoFog(on)
 	end
 end
 
+-- Пресеты неба
 local SkyPresets = {
 	{ name = "Purple (Default)", id = 1 },
 	{ name = "Blue Night", id = 2 },
@@ -1016,13 +1071,13 @@ local function updateTrailColor()
 end
 onTheme(updateTrailColor)
 
-local function stopTrail()
+function stopTrail()
 	state.trail = false
 	if trailInstance then trailInstance:Destroy() trailInstance = nil end
 	if trailAttachment0 then trailAttachment0:Destroy() trailAttachment0 = nil end
 	if trailAttachment1 then trailAttachment1:Destroy() trailAttachment1 = nil end
 end
-local function startTrail()
+function startTrail()
 	refreshCharacter()
 	if not char or not hrp then return end
 	state.trail = true
@@ -1325,14 +1380,3 @@ local dragStart,startPos
 header.InputBegan:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=true dragStart=input.Position startPos=mainFrame.Position end end)
 UserInputService.InputChanged:Connect(function(input) if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then local delta=input.Position-dragStart mainFrame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y) end end)
 UserInputService.InputEnded:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
-
--- Очистка при выходе (без BindToClose, который только для сервера)
-player.OnTeleport:Connect(function()
-	stopFly() stopNoclip() stopFling() stopESP() stopAim() stopAntifling()
-	stopTrail()
-	if motionBlurEffect then motionBlurEffect:Destroy() end
-	if state.fullbright then setFullbright(false) end
-	if state.noFog then setNoFog(false) end
-	if state.customSky then setCustomSky(false) end
-	Lighting.ClockTime = visualDefaults.clock
-end)
